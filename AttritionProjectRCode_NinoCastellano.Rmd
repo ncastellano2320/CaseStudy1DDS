@@ -1,0 +1,607 @@
+---
+title: "DDS Project 1"
+author: "Nino Castellano"
+date: "2025-10-14"
+output: html_document
+---
+
+## Project 1: DDSAnalytics on Employee Attrition at Frito Lay
+
+### **Executive Summary**
+
+This study aims to support Frito-Lay’s Talent Management team by predicting employee attrition — specifically whether an employee is likely to leave the company (“Yes”) or stay (“No”) — using two supervised machine learning models: **K-Nearest Neighbors (KNN)** and **Naive Bayes**. Our objective is not only to forecast attrition risk, but to identify which factors most strongly drive turnover so that Frito-Lay can optimize retention strategies and proactively manage talent costs.
+
+Using statistically validated features (Wilcoxon test for numeric variables and Chi-Square test for categorical variables, α = 0.05), we identified the following key drivers influencing attrition: **Monthly Income, Distance From Home, Age, Total Working Years, Years at Company, Years in Current Role, and Manager Tenure**, along with categorical factors such as **Business Travel frequency, Job Role, Job Satisfaction, Overtime status, Marital Status, Environmental Satisfaction, Work-Life Balance, and Department**.
+
+After applying SMOTE sampling and training on a 70/30 train-test split, the models achieved the following results:
+
+-   **KNN (k = 65, 0.50 threshold):** 62.45% accuracy \| 61.90% sensitivity \| 62.55% specificity
+
+-   **Naive Bayes (0.75 threshold):** 63.60% accuracy \| 64.29% sensitivity \| 63.47% specificity
+
+While predictive performance was modest, both models showed balanced sensitivity and specificity, confirming that attrition risk is explainable and learnable from employee data. Our primary recommendation is to **tune decision thresholds based on whether Frito-Lay prioritizes minimizing turnover cost (higher sensitivity) or avoiding unnecessary retention spending (higher specificity)**. We further recommend exploring more advanced methods such as **ensemble models, gradient boosting, and neural networks** to improve predictive accuracy and reduce cost trade offs.
+
+Link To Video Presentation: <https://smu365-my.sharepoint.com/:v:/r/personal/ncastellano_smu_edu/Documents/Doing%20Data%20Science/video5235657192.mp4?csf=1&web=1&nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=uYz72B>
+
+### Loading Necessary Libraries
+
+```{r}
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(corrplot)
+library(GGally)
+library(ggthemes)
+library(caret)
+library(reshape2)
+library(e1071)       # For Naive Bayes
+library(class)       # For KNN
+```
+
+### Step 1: Exploratory Data Analysis
+
+### Loading the Data-set
+
+```{r}
+# Step 1: Exploratory Data Analysis 
+data = read.csv("/Users/ncast/OneDrive/Documents/DoingDataScience R Files/CaseStudy1-data.csv")
+```
+
+```{r}
+# View structure and summary
+str(data)
+summary(data)
+head(data)
+```
+
+### Looking for Missing Values
+
+```{r}
+# Table for All the NA Values for Each variable 
+na_table <- data %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "NA_Count") %>%
+  arrange(desc(NA_Count))  # Optional: sort by most missing
+
+print(n = 36,na_table)
+
+# Table for All Blank Values for Each Variable 
+blank_table <- data %>%
+  summarise(across(everything(), ~sum(. == "", na.rm = TRUE))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Blank_Count") %>%
+  arrange(desc(Blank_Count))
+
+print(n = 36,blank_table)
+```
+
+### Identify categorical and numeric columns
+
+```{r}
+categorical_vars <- names(data)[sapply(data, is.factor) | sapply(data, is.character)]
+numeric_vars <- names(data)[sapply(data, is.numeric)]
+
+categorical_vars
+numeric_vars
+```
+
+### Transforming Categorical Factored Variables
+
+```{r}
+data <- data %>%
+  mutate(
+    # Education
+    Education = factor(Education,
+                       levels = c(1, 2, 3, 4, 5),
+                       labels = c("Below College", "College", "Bachelor", "Master", "Doctor")),
+    
+    # Environment Satisfaction
+    EnvironmentSatisfaction = factor(EnvironmentSatisfaction,
+                                     levels = c(1, 2, 3, 4),
+                                     labels = c("Low", "Medium", "High", "Very High")),
+    
+    # Job Involvement
+    JobInvolvement = factor(JobInvolvement,
+                            levels = c(1, 2, 3, 4),
+                            labels = c("Low", "Medium", "High", "Very High")),
+    
+    # Job Level
+    JobLevel = factor(JobLevel,
+                      levels = c(1, 2, 3, 4, 5),
+                      labels = c("Entry Level", "Junior Level", "Mid Level", "Senior Level", "Executive Level")),
+    
+    # Job Satisfaction
+    JobSatisfaction = factor(JobSatisfaction,
+                             levels = c(1, 2, 3, 4),
+                             labels = c("Low", "Medium", "High", "Very High")),
+    
+    # Performance Rating
+    PerformanceRating = factor(PerformanceRating,
+                               levels = c(1, 2, 3, 4),
+                               labels = c("Low", "Good", "Excellent", "Outstanding")),
+    
+    # Relationship Satisfaction
+    RelationshipSatisfaction = factor(RelationshipSatisfaction,
+                                      levels = c(1, 2, 3, 4),
+                                      labels = c("Low", "Medium", "High", "Very High")),
+    
+    # Stock Option Level
+    StockOptionLevel = factor(StockOptionLevel,
+                              levels = c(0, 1, 2, 3),
+                              labels = c("None", "Low", "Medium", "High")),
+    
+    # Work Life Balance
+    WorkLifeBalance = factor(WorkLifeBalance,
+                             levels = c(1, 2, 3, 4),
+                             labels = c("Bad", "Good", "Better", "Best"))
+  )
+
+# New Set of Categorical Variables
+categorical_vars <- names(data)[sapply(data, is.factor) | sapply(data, is.character)]
+categorical_vars
+
+# New Set of Numeric Variables
+numeric_vars <- names(data)[sapply(data, is.numeric)]
+numeric_vars
+```
+
+### Exploring Target Variable (Attrition)
+
+```{r}
+data %>%
+  count(Attrition)
+prop.table(table(data$Attrition))
+
+# Visualize attrition
+ggplot(data, aes(x = Attrition)) + 
+  geom_bar(fill = "steelblue") +
+  labs(title = "Attrition Count", y = "Count") +
+  theme_solarized_2()
+```
+
+### Distributions of Numeric Variables
+
+```{r}
+data %>% 
+  select_if(is.numeric) %>%
+  gather() %>%
+  ggplot(aes(value)) +
+  geom_histogram(fill = "skyblue", color = "black") +
+  facet_wrap(~key, scales = "free") +
+  theme_minimal()
+```
+
+### Attrition to Categorical Variables Bar Plots
+
+```{r}
+categorical_vars
+for (var in categorical_vars) {
+  print(
+    ggplot(data, aes_string(x = var, fill = "Attrition")) +
+      geom_bar(position = "fill") +
+      labs(title = paste("Attrition vs", var), y = "Proportion") +
+      theme_solarized_2()
+  )
+}
+```
+
+### Testing Significance of Chosen Categorical Variables
+
+```{r}
+# Testing Significance of Chosen Categorical Variables 
+# Chosen numeric variables
+categorical_vars_totest <- c("BusinessTravel", "Department", "EducationField",
+                      "EnvironmentSatisfaction", "JobInvolvement", "JobLevel",
+                      "JobRole", "MaritalStatus", "OverTime",
+                      "RelationshipSatisfaction", "StockOptionLevel", "WorkLifeBalance")
+
+# Initialize empty results data frame
+chi_results <- data.frame(
+  Variable = character(),
+  P_Value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through categorical variables and run Chi-Square test
+for (var in categorical_vars) {
+  cat("\nChi-Square Test for:", var, "On Attrition \n")
+  tbl <- table(data[[var]], data$Attrition)
+  print(tbl)
+  print(chisq.test(tbl))
+}
+
+for (var in categorical_vars) {
+  tbl <- table(data[[var]], data$Attrition)
+  test_result <- chisq.test(tbl)
+  
+  chi_results <- rbind(chi_results, data.frame(
+    Variable = var,
+    P_Value = test_result$p.value
+  ))
+}
+
+# Sort by significance (lowest p-value first)
+chi_results <- chi_results[order(chi_results$P_Value), ]
+
+# Convert scientific notation to decimal (as character for display)
+chi_results$P_Value <- formatC(chi_results$P_Value, format = "f", digits = 12)
+
+print(chi_results)
+```
+
+### Attrition to Numeric Variables Box Plot
+
+```{r}
+numeric_vars
+for (var in numeric_vars) {
+  print(
+    ggplot(data, aes_string(x = "Attrition", y = var, fill = "Attrition")) +
+      geom_violin(alpha = 0.5, trim = FALSE) +  # density shape
+      geom_boxplot(width = 0.15, outlier.shape = NA) +  # thinner boxplot on top
+      labs(title = paste("Attrition vs", var)) +
+      theme_solarized_2()
+  )
+}
+```
+
+### Testing Significance of Chosen Numerical Variables
+
+```{r}
+# Testing Significance of Chosen Numerical Variables
+# Chosen numeric variables
+numeric_vars_totest <- c("Age", "MonthlyIncome", "DistanceFromHome", "NumCompaniesWorked",
+                         "PercentSalaryHike", "TotalWorkingYears", "TrainingTimesLastYear",
+                         "YearsAtCompany", "YearsInCurrentRole", "YearsSinceLastPromotion",
+                         "YearsWithCurrManager")
+
+for (var in numeric_vars_totest) {
+  print(
+    ggplot(data, aes_string(x = "Attrition", y = var, fill = "Attrition")) +
+      geom_violin(alpha = 0.5, trim = FALSE) +  # density shape
+      geom_boxplot(width = 0.15, outlier.shape = NA) +  # thinner boxplot on top
+      labs(title = paste("Attrition vs", var)) +
+      theme_solarized_2()
+  )
+}
+# Initialize empty results data frame
+results <- data.frame(
+  Variable = character(),
+  P_Value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through numeric variables and run Wilcoxon test
+for (var in numeric_vars_totest) {
+  test_result <- wilcox.test(data[[var]] ~ data$Attrition)
+  results <- rbind(results, data.frame(
+    Variable = var,
+    P_Value = test_result$p.value
+  ))
+}
+
+# Convert scientific notation to decimal
+results$P_Value <- formatC(results$P_Value, format = "f", digits = 9)
+print(results)
+```
+
+### **Features Used in our KNN and Naive Bayes Classifier Models**
+
+**Numeric (Wilcoxon Ranked Sum Test alpha = 0.05):**
+
+-   Age
+
+-   Monthly Income
+
+-   Distance From Home
+
+-   Total Working Years
+
+-   Years at Company
+
+-   Years in Current Role
+
+-   Years with Current Manager
+
+**Categorical (Chi-Squared Test alpha = 0.05):**
+
+-   Attrition (Target Variable)
+
+-   Business Travel
+
+-   Department
+
+-   Environmental Satisfaction
+
+-   Job Involvement
+
+-   Job Level
+
+-   Job Role
+
+-   Job Satisfaction
+
+-   Marital Status
+
+-   Overtime
+
+-   Stock Option Level
+
+-   Work-Life Balance
+
+### Step 2: Analysis and Model Evaluation
+
+### Selecting Important Features
+
+```{r}
+# Selecting Important Features 
+# --- 1️⃣ Select Important Variables (Replace these with your actual chosen variables) ---
+
+original_data = read.csv("/Users/ncast/OneDrive/Documents/DoingDataScience R Files/CaseStudy1-data.csv")
+
+important_vars <- c("Age", "MonthlyIncome", "DistanceFromHome", "TotalWorkingYears",
+                    "YearsAtCompany", "YearsInCurrentRole", "YearsWithCurrManager",
+                    "BusinessTravel", "Department", "EnvironmentSatisfaction", 
+                    "JobInvolvement", "JobLevel", "JobRole", "JobSatisfaction",
+                    "MaritalStatus", "OverTime", "StockOptionLevel", "WorkLifeBalance")  # Example
+model_data <- original_data %>% select(all_of(important_vars), Attrition)
+
+# Convert Attrition and categorical to factor (if not already)
+model_data$Attrition <- as.factor(model_data$Attrition)
+dim(model_data)
+model_data
+```
+
+### Split Data into Train/Test Sets
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(model_data$Attrition, p = 0.7, list = FALSE)
+model_data$Attrition <- as.factor(model_data$Attrition) 
+model_data$Attrition <- relevel(model_data$Attrition, ref = "Yes")
+train <- model_data[trainIndex, ]
+dim(train)
+test <- model_data[-trainIndex, ]
+dim(test)
+```
+
+### KNN Classifier
+
+### Training Model
+
+```{r}
+# --- KNN Classifier ---
+set.seed(123)
+
+ctrl <- trainControl(
+  method = "cv", 
+  number = 10, # 10-fold cross-validation
+  sampling = "smote"   # balances classes during resampling
+)
+
+knn_model <- train(
+  Attrition ~ ., 
+  data = train_scaled, 
+  method = "knn",
+  trControl = ctrl,
+  tuneGrid = data.frame(k=12:100)
+)
+```
+
+### Best K Value
+
+```{r}
+knn_model$bestTune
+```
+
+### Results Metrics
+
+```{r}
+# Get predicted probabilities
+knn_probs <- predict(knn_model, newdata = test_scaled, type = "prob")
+
+# Adjust threshold (try 0.3 or 0.4 instead of 0.5)
+threshold <- 0.5
+knn_pred_adj <- ifelse(knn_probs$Yes >= threshold, "Yes", "No") %>% as.factor()
+
+# Recalculate confusion matrix
+knn_cm_adj <- confusionMatrix(knn_pred_adj, test_scaled$Attrition, positive = "Yes")
+knn_cm_adj
+```
+
+### Plotting K-Value on Accuracy
+
+```{r}
+# Extract results from the trained model
+results <- knn_model$results
+
+# If results only have Accuracy, compute sensitivity & specificity manually
+# (only necessary if you didn't include them in training)
+# Otherwise, they will already be present.
+
+# Plot accuracy / sensitivity / specificity vs. k
+ggplot(results, aes(x = k)) +
+  geom_line(aes(y = Accuracy, color = "Accuracy"), size = 1) +
+  geom_point(aes(y = Accuracy, color = "Accuracy")) +
+  labs(title = "Model Performance by K Value",
+       x = "K (Number of Neighbors)",
+       y = "Metric Value") +
+  theme_minimal()
+```
+
+### Plotting Probability Threshold on Sensitivity and Specificity
+
+```{r}
+# --- 1) Evaluate many thresholds on the TEST set ---
+thresholds <- seq(0.05, 0.95, by = 0.05)   # adjust granularity if you like
+metrics <- data.frame()
+
+for (t in thresholds) {
+  pred <- ifelse(knn_probs$Yes >= t, "Yes", "No") %>% 
+    factor(levels = c("No","Yes"))
+  cm <- confusionMatrix(pred, test_scaled$Attrition, positive = "Yes")
+  
+  metrics <- rbind(metrics, data.frame(
+    Threshold   = t,
+    Sensitivity = as.numeric(cm$byClass["Sensitivity"]),
+    Specificity = as.numeric(cm$byClass["Specificity"]),
+    Accuracy    = as.numeric(cm$overall["Accuracy"]),
+    Precision   = as.numeric(cm$byClass["Precision"]),
+    F1          = as.numeric(cm$byClass["F1"])
+  ))
+}
+
+print(metrics)
+
+# --- 2) Plot Sensitivity & Specificity vs Threshold ---
+metrics_long <- metrics %>%
+  pivot_longer(cols = c(Sensitivity, Specificity),
+               names_to = "Metric", values_to = "Value")
+
+ggplot(metrics_long, aes(x = Threshold, y = Value, color = Metric)) +
+  geom_line(size = 1.1) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0.60, linetype = "dashed") +  # your target sensitivity
+  labs(title = "KNN: Sensitivity & Specificity vs Threshold",
+       x = "Threshold for predicting 'Yes'",
+       y = "Metric value") +
+  theme_minimal()
+
+```
+
+### Naive Bayes Classfier
+
+### Training Model
+
+```{r}
+# --- Naive Bayes Classfier --- 
+set.seed(123)
+ctrl <- trainControl(
+  method = "cv",
+  number = 10,
+  sampling = "smote"  # balances the data during resampling
+)
+
+nb_model <- train(
+  Attrition ~ ., 
+  data = train,
+  method = "naive_bayes",   # use caret’s version
+  trControl = ctrl
+)
+```
+
+### Plotting Probability Threshold on Sensitivity and Specificity
+
+```{r}
+# Predict probabilities instead of classes
+# --- 1️⃣ Predict probabilities on the test set ---
+nb_probs <- predict(nb_model, newdata = test, type = "prob")
+
+# --- 2️⃣ Evaluate a range of thresholds ---
+thresholds <- seq(0.1, 0.9, by = 0.05)
+metrics <- data.frame()
+
+for (t in thresholds) {
+  nb_pred_adj <- ifelse(nb_probs$Yes >= t, "Yes", "No") %>% as.factor()
+  cm <- confusionMatrix(nb_pred_adj, test$Attrition, positive = "Yes")
+  
+  metrics <- rbind(metrics, data.frame(
+    Threshold   = t,
+    Accuracy    = cm$overall["Accuracy"],
+    Sensitivity = cm$byClass["Sensitivity"],
+    Specificity = cm$byClass["Specificity"]
+  ))
+}
+
+# --- 3️⃣ Plot Sensitivity & Specificity vs Threshold ---
+metrics_long <- metrics %>%
+  pivot_longer(cols = c("Sensitivity", "Specificity"),
+               names_to = "Metric", values_to = "Value")
+
+ggplot(metrics_long, aes(x = Threshold, y = Value, color = Metric)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0.60, linetype = "dashed") +
+  labs(
+    title = "Naive Bayes: Sensitivity & Specificity vs Threshold",
+    x = "Threshold for predicting 'Yes'",
+    y = "Metric Value"
+  ) +
+  theme_minimal()
+```
+
+### Results Metrics
+
+```{r}
+# Using Best Threshold 
+nb_probs <- predict(nb_model, newdata = test, type = "prob") 
+# Adjust threshold (try most appropriate) 
+threshold <- 0.75 
+nb_pred_adj <- ifelse(nb_probs$Yes >= threshold, "Yes", "No") %>% as.factor() 
+# Evaluate 
+nb_cm_adj <- confusionMatrix(nb_pred_adj, test$Attrition, positive = "Yes") 
+nb_cm_adj
+```
+
+### Testing Tuned Models on Test Data
+
+```{r}
+# 1) Load the full, unlabeled test set (no filtering)
+test_data <- read.csv("/Users/ncast/OneDrive/Documents/DoingDataScience R Files/CaseStudy1CompSet No Attrition.csv")  
+
+# 2) Find the ID column (edit this if your ID has a different name)
+id_candidates <- c("EmployeeNumber","EmployeeID","ID","Id")
+id_col <- id_candidates[id_candidates %in% names(test_data)]
+if (length(id_col) == 0) stop("No ID column found. Please rename or set `id_col` manually.")
+id_col <- id_col[1]  # first match
+
+# (Optional but safe): align factor levels to training if your models expect specific levels.
+# This won't filter; it just ensures factors present in test match training expectations.
+align_levels <- function(new_df, ref_df) {
+  for (nm in intersect(names(new_df), names(ref_df))) {
+    if (is.factor(ref_df[[nm]])) {
+      new_df[[nm]] <- factor(new_df[[nm]], levels = levels(ref_df[[nm]]))
+    }
+  }
+  new_df
+}
+# If you have 'train' in memory, uncomment the next line:
+test_data <- align_levels(test_data, train)
+
+# 3) Prepare data for each model
+# KNN needs the SAME scaling used at training time
+test_scaled <- predict(preProcValues, test_data)
+
+# 4) Predict probabilities
+knn_probs <- predict(knn_model, newdata = test_scaled, type = "prob")
+nb_probs  <- predict(nb_model,  newdata = test_data,  type = "prob")
+
+# 5) Apply your chosen thresholds
+KNN_THRESHOLD <- 0.05
+NB_THRESHOLD  <- 0.75
+
+knn_pred <- ifelse(knn_probs$Yes >= KNN_THRESHOLD, "Yes", "No")
+nb_pred  <- ifelse(nb_probs$Yes  >= NB_THRESHOLD,  "Yes", "No")
+
+# 6) Build two-column outputs (keep original row order)
+knn_submit <- data.frame(
+  ID = test_data[[id_col]],
+  Attrition = knn_pred,
+  stringsAsFactors = FALSE
+)
+
+nb_submit <- data.frame(
+  ID = test_data[[id_col]],
+  Attrition = nb_pred,
+  stringsAsFactors = FALSE
+)
+
+# Sort by ID ascending
+knn_submit <- knn_submit[order(knn_submit$ID), ]
+nb_submit  <- nb_submit[order(nb_submit$ID), ]
+```
+
+### Using Best Model to Write to Predictions CSV File
+
+```{r}
+write.csv(nb_submit,  "Case1PredictionsCastellano Attrition.csv",  row.names = FALSE)
+```
